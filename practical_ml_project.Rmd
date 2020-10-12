@@ -1,0 +1,132 @@
+---
+title: "Predicting Type of Exercise"
+author: "Sarah Friedman"
+output: html_document
+---
+
+# Background
+The purpose of this exercise is to generate a model that can predict exercise type using data related to exercise measurements. 
+
+# Data
+For this exercise, two data sets were provided: (1) a data set named "training" with 19622 observations and 160 variables and a labelled outcome variable "classe" and (2) a data set named "testing" with 20 observations and 160 variables. The "testing" data set does not include a labeled outcome variable, and as such results can not be validated, so the testing data set will not be used for testing. Rather, the "training" data set was divided into two sets: training data (70%) and testing data (30%).
+
+Data Source: [Human Activity Recognition](http://groupware.les.inf.puc-rio.br/har)
+
+
+## Missing Data
+Observations with missing data were removed, as were columns without predictive value, i.e. where all of the values were the same. This resulted in a data set with 152 variables, and 229 observations in a training set and 95 observations in a testing set. 
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r, include = F, message = F, warning = F}
+################################################################################
+#                                 LIBRARIES                                    #
+################################################################################
+# NOTE: the packages below should be installed prior to knitting this Rmd
+# install.packages('caret', "kableExtra")
+library(dplyr)
+library(lubridate)
+library(readr)
+library(ggplot2)
+library(stringr)
+library(caret)
+library(RRF)
+library(rattle)
+library(kableExtra)
+
+
+################################################################################
+#                                 LOAD DATA                                    #
+################################################################################
+# Training
+pml_training <- read_csv("/Users/sarahfriedman/Documents/Coursera/pml-training.csv")
+
+# Test
+pml_testing <- read_csv("/Users/sarahfriedman/Documents/Coursera/pml-testing.csv")
+
+
+################################################################################
+#                                PREPARE DATA                                   #
+################################################################################
+
+# Remove observations where classe is missing
+pml_training_new <- pml_training %>%
+  # Remove observations with missing values
+  na.exclude() %>%
+  # Make a factor variable
+  mutate(classe = as.factor(classe)) %>%
+  # Remove columns with no predictive power (i.e. where there is only one value)
+  select_if(~n_distinct(.) > 1) %>%
+  select(-X1)
+
+inTrain <- createDataPartition(y = pml_training_new$classe, p = 0.7, list = FALSE)
+
+# Select all rows in inTrain for training
+training <- pml_training_new[inTrain, ]
+
+# Select all rows not in inTrain for testing
+testing <- pml_training_new[-inTrain, ]
+
+################################################################################
+#                          FEATURE SELECTION                                  #
+################################################################################
+set.seed(10)
+rpartmod <- train(classe ~ ., data = training, method = "rpart")
+rpartImp <- varImp(rpartmod)
+print(rpartImp)
+
+```
+
+# Model Building
+Through feature selection with classification trees, predictors with any importance were used in the final training model, as indicated below.
+
+```{r, results = 'asis', warning = FALSE, echo = FALSE, message = FALSE}
+plot(rpartImp, top = 13, main = "Variable Importance")
+```
+
+
+```{r, include = F, message = F, warning = F}
+# Predictors with any importance
+predictors <- c("var_roll_belt", "var_total_accel_belt", "avg_roll_belt",
+                "amplitude_pitch_belt", "var_accel_dumbbell", "avg_roll_dumbbell",
+                "var_accel_arm", "amplitude_yaw_arm", "min_roll_arm", "max_roll_dumbbell",
+                "avg_pitch_forearm", "min_roll_forearm")
+
+# Update training and testing sets to include important predictors only
+training_new <- training[, c("classe", predictors)]
+testing_new <- testing[, c("classe", predictors)]
+
+# Train the model using 
+set.seed(10)
+modFit <- train(classe ~ ., method = "ranger", data = training_new)
+
+print(modFit)
+
+# Make predictions
+prediction <- predict(modFit, testing_new)
+
+# Review confusion matrix
+conmat <- confusionMatrix(prediction, testing_new$classe)
+
+accuracy <- conmat$overall["Accuracy"]
+in_sample_error <- 1-accuracy
+out_of_sample_error <- in_sample_error + 0.07
+
+```
+
+
+# Final Model and Cross Validation
+The final model was obtained using random forest due to the high accuracy of this approach. The confusion matrix statistics, seen below, indicate `r accuracy` accuracy when this model was used to make predictions on the testing set, and thus `r in_sample_error` in-sample error. As out of sample error is expected to be greater than in sample error, we estimate out of sample error as around `r out_of_sample_error`.
+
+```{r, results = 'asis', warning = FALSE, echo = FALSE, message = FALSE}
+
+kable(as.matrix(conmat$overall), align = "c")
+
+```
+
+
+
